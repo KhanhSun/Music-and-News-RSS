@@ -1,0 +1,1833 @@
+--- PROJECT SOURCE CODE EXTRACT ---
+Project Path: C:/Users/HP/Desktop/Save/PTUDDDDNT/music_rss_app
+
+==================================================
+FILE: lib\main.dart
+==================================================
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'package:just_audio_background/just_audio_background.dart';
+import 'core/constants/supabase_constants.dart';
+import 'core/router/app_router.dart';
+import 'core/theme/app_theme.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Supabase.initialize(
+    url: SupabaseConstants.supabaseUrl,
+    anonKey: SupabaseConstants.supabaseAnonKey,
+  );
+
+  await JustAudioBackground.init(
+    androidNotificationChannelId: 'music.app.channel.audio',
+    androidNotificationChannelName: 'Music Playback',
+    androidNotificationOngoing: true,
+  );
+
+  runApp(const ProviderScope(child: MyApp()));
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ScreenUtilInit(
+      designSize: const Size(390, 844),
+      minTextAdapt: true,
+      splitScreenMode: true,
+      builder: (_, child) {
+        return MaterialApp.router(
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.darkTheme,
+          routerConfig: appRouter,
+        );
+      },
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\core\constants\rss_constants.dart
+==================================================
+
+class RssConstants {
+  static const technology = 'https://feeds.bbci.co.uk/news/technology/rss.xml';
+
+  static const sport = 'https://feeds.bbci.co.uk/sport/football/rss.xml';
+
+  static const business = 'https://feeds.bbci.co.uk/news/business/rss.xml';
+
+  static const entertainment =
+      'https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml';
+}
+
+
+==================================================
+FILE: lib\core\constants\supabase_constants.dart
+==================================================
+
+class SupabaseConstants {
+  static const supabaseUrl = 'https://vnyhlzlydvpcelzzkgtq.supabase.co';
+  static const supabaseAnonKey =
+      'sb_publishable_40JcWwPOxhfY094KbZu1Ww_IeQ5IF4i';
+}
+
+
+==================================================
+FILE: lib\core\router\app_router.dart
+==================================================
+
+import 'package:go_router/go_router.dart';
+import '../../features/upload/presentation/screens/upload_screen.dart';
+import '../../features/home/home_screen.dart';
+
+final appRouter = GoRouter(
+  routes: [
+    GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
+    GoRoute(path: '/upload', builder: (context, state) => const UploadScreen()),
+  ],
+);
+
+
+==================================================
+FILE: lib\core\services\supabase_service.dart
+==================================================
+
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+class SupabaseService {
+  static final client = Supabase.instance.client;
+}
+
+
+==================================================
+FILE: lib\core\theme\app_colors.dart
+==================================================
+
+import 'package:flutter/material.dart';
+
+class AppColors {
+  static const background = Color(0xFF0D0D0D);
+  static const surface = Color(0xFF151515);
+
+  static const accent = Color(0xFF1DB954);
+
+  static const neonBlue = Color(0xFF00D1FF);
+  static const neonPurple = Color(0xFF7B61FF);
+
+  static const textPrimary = Colors.white;
+  static const textSecondary = Color(0xFFB3B3B3);
+}
+
+
+==================================================
+FILE: lib\core\theme\app_theme.dart
+==================================================
+
+import 'package:flutter/material.dart';
+import 'app_colors.dart';
+
+class AppTheme {
+  static ThemeData darkTheme = ThemeData(
+    brightness: Brightness.dark,
+    scaffoldBackgroundColor: AppColors.background,
+
+    colorScheme: const ColorScheme.dark(primary: AppColors.accent),
+
+    bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+      backgroundColor: AppColors.surface,
+      selectedItemColor: AppColors.accent,
+      unselectedItemColor: Colors.grey,
+      elevation: 0,
+    ),
+
+    appBarTheme: const AppBarTheme(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+    ),
+  );
+}
+
+
+==================================================
+FILE: lib\core\utils\duration_formatter.dart
+==================================================
+
+String formatDuration(Duration duration) {
+  final minutes = duration.inMinutes.remainder(60).toString();
+
+  final seconds = duration.inSeconds.remainder(60).toString();
+
+  return '$minutes:${seconds.padLeft(2, '0')}';
+}
+
+
+==================================================
+FILE: lib\features\home\home_screen.dart
+==================================================
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../shared/widgets/mini_player.dart';
+
+import '../music/models/song_model.dart';
+
+import '../../shared/providers/audio_controller.dart';
+
+import '../music/presentation/providers/realtime_song_provider.dart';
+
+import '../music/presentation/screens/player_screen.dart';
+
+import '../music/presentation/widgets/music_card.dart';
+
+import '../rss/presentation/screens/rss_screen.dart';
+
+import 'widgets/app_background.dart';
+
+import 'widgets/home_header.dart';
+
+import 'widgets/main_navigation.dart';
+
+class HomeScreen extends ConsumerStatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  int currentIndex = 0;
+
+  bool playlistLoaded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      buildHomePage(),
+      const SizedBox(),
+      const RssScreen(),
+      const SizedBox(),
+    ];
+
+    return Scaffold(
+      extendBody: true,
+
+      body: pages[currentIndex],
+
+      bottomNavigationBar: MainNavigation(
+        currentIndex: currentIndex,
+
+        onTap: (value) {
+          setState(() {
+            currentIndex = value;
+          });
+        },
+      ),
+    );
+  }
+
+  Widget buildHomePage() {
+    return AppBackground(
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+
+          child: Column(
+            children: [
+              const HomeHeader(),
+
+              const SizedBox(height: 30),
+
+              Expanded(
+                child: Consumer(
+                  builder: (context, ref, _) {
+                    final songsAsync = ref.watch(realtimeSongsProvider);
+
+                    return songsAsync.when(
+                      data: (songsData) {
+                        final songs = songsData
+                            .map((e) => SongModel.fromJson(e))
+                            .toList();
+
+                        /// LOAD PLAYLIST 1 LẦN DUY NHẤT
+                        if (!playlistLoaded && songs.isNotEmpty) {
+                          playlistLoaded = true;
+
+                          Future.microtask(() async {
+                            await ref
+                                .read(audioControllerProvider.notifier)
+                                .loadPlaylist(songs);
+                          });
+                        }
+
+                        return ListView(
+                          children: [
+                            Container(
+                              height: 220,
+
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(30),
+
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFF7B61FF),
+                                    Color(0xFF00D1FF),
+                                  ],
+                                ),
+                              ),
+
+                              child: const Center(
+                                child: Text(
+                                  'Trending Music',
+
+                                  style: TextStyle(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(height: 24),
+
+                            const Text(
+                              'Songs',
+
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+
+                            const SizedBox(height: 20),
+
+                            SizedBox(
+                              height: 240,
+
+                              child: ListView.builder(
+                                scrollDirection: Axis.horizontal,
+
+                                itemCount: songs.length,
+
+                                itemBuilder: (_, index) {
+                                  final song = songs[index];
+
+                                  return MusicCard(
+                                    song: song,
+
+                                    onTap: () async {
+                                      await ref
+                                          .read(
+                                            audioControllerProvider.notifier,
+                                          )
+                                          .playSong(song, index);
+
+                                      if (context.mounted) {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                PlayerScreen(song: song),
+                                          ),
+                                        );
+                                      }
+                                    },
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+
+                      loading: () =>
+                          const Center(child: CircularProgressIndicator()),
+
+                      error: (e, _) => Center(child: Text(e.toString())),
+                    );
+                  },
+                ),
+              ),
+
+              const MiniPlayer(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\home\widgets\app_background.dart
+==================================================
+
+import 'package:flutter/material.dart';
+
+import '../../../core/theme/app_colors.dart';
+
+class AppBackground extends StatelessWidget {
+  final Widget child;
+
+  const AppBackground({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppColors.background, Color(0xFF131A2A), Color(0xFF1A1033)],
+        ),
+      ),
+      child: child,
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\home\widgets\glass_card.dart
+==================================================
+
+import 'dart:ui';
+
+import 'package:flutter/material.dart';
+
+class GlassCard extends StatelessWidget {
+  final Widget child;
+
+  const GlassCard({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            color: Colors.white.withOpacity(0.05),
+            border: Border.all(color: Colors.white.withOpacity(0.08)),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\home\widgets\home_header.dart
+==================================================
+
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+
+class HomeHeader extends StatelessWidget {
+  const HomeHeader({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+
+      children: [
+        const Text(
+          'Discover',
+          style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
+        ),
+
+        Row(
+          children: [
+            IconButton(
+              onPressed: () {
+                context.push('/upload');
+              },
+
+              icon: const Icon(Icons.upload_rounded),
+            ),
+
+            const CircleAvatar(
+              radius: 22,
+              backgroundImage: NetworkImage('https://i.pravatar.cc/300'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\home\widgets\main_navigation.dart
+==================================================
+
+import 'package:flutter/material.dart';
+
+import '../../../core/theme/app_colors.dart';
+
+class MainNavigation extends StatelessWidget {
+  final int currentIndex;
+  final Function(int) onTap;
+
+  const MainNavigation({
+    super.key,
+    required this.currentIndex,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return BottomNavigationBar(
+      currentIndex: currentIndex,
+      onTap: onTap,
+      type: BottomNavigationBarType.fixed,
+      backgroundColor: AppColors.surface,
+      items: const [
+        BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Home'),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.music_note_rounded),
+          label: 'Music',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.newspaper_rounded),
+          label: 'News',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.library_music_rounded),
+          label: 'Library',
+        ),
+      ],
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\home\widgets\mini_player.dart
+==================================================
+
+import 'package:flutter/material.dart';
+
+import '../../../core/theme/app_colors.dart';
+
+class MiniPlayer extends StatelessWidget {
+  const MiniPlayer({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.network(
+              'https://picsum.photos/200',
+              width: 55,
+              height: 55,
+              fit: BoxFit.cover,
+            ),
+          ),
+
+          const SizedBox(width: 12),
+
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Blinding Lights',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 4),
+                Text('The Weeknd', style: TextStyle(color: Colors.grey)),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: () {},
+            icon: const Icon(Icons.skip_previous_rounded),
+          ),
+
+          IconButton(
+            onPressed: () {},
+            icon: const Icon(Icons.play_circle_fill_rounded),
+          ),
+
+          IconButton(
+            onPressed: () {},
+            icon: const Icon(Icons.skip_next_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\music\data\repositories\song_repository.dart
+==================================================
+
+import '../../../../core/services/supabase_service.dart';
+import '../../models/song_model.dart';
+
+class SongRepository {
+  Future<List<SongModel>> getSongs() async {
+    final response = await SupabaseService.client
+        .from('songs')
+        .select()
+        .order('created_at');
+
+    return response.map<SongModel>((song) => SongModel.fromJson(song)).toList();
+  }
+}
+
+
+==================================================
+FILE: lib\features\music\models\player_state_model.dart
+==================================================
+
+class PlayerStateModel {
+  final bool isPlaying;
+  final Duration position;
+  final Duration duration;
+
+  PlayerStateModel({
+    required this.isPlaying,
+    required this.position,
+    required this.duration,
+  });
+
+  PlayerStateModel copyWith({
+    bool? isPlaying,
+    Duration? position,
+    Duration? duration,
+  }) {
+    return PlayerStateModel(
+      isPlaying: isPlaying ?? this.isPlaying,
+      position: position ?? this.position,
+      duration: duration ?? this.duration,
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\music\models\song_model.dart
+==================================================
+
+class SongModel {
+  final String id;
+  final String title;
+  final String artist;
+  final String coverUrl;
+  final String audioUrl;
+  final String lyrics;
+
+  SongModel({
+    required this.id,
+    required this.title,
+    required this.artist,
+    required this.coverUrl,
+    required this.audioUrl,
+    required this.lyrics,
+  });
+
+  factory SongModel.fromJson(Map<String, dynamic> json) {
+    return SongModel(
+      id: json['id'],
+      title: json['title'],
+      artist: json['artist'],
+      coverUrl: json['cover_url'],
+      audioUrl: json['audio_url'],
+      lyrics: json['lyrics'] ?? '',
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\music\presentation\providers\audio_provider.dart
+==================================================
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:just_audio/just_audio.dart';
+
+final audioPlayerProvider = Provider<AudioPlayer>((ref) {
+  return AudioPlayer();
+});
+
+
+==================================================
+FILE: lib\features\music\presentation\providers\player_streams.dart
+==================================================
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../../shared/providers/audio_controller.dart';
+
+final positionStreamProvider = StreamProvider<Duration>((ref) {
+  final player = ref.watch(audioControllerProvider);
+
+  return player.positionStream;
+});
+
+final durationStreamProvider = StreamProvider<Duration?>((ref) {
+  final player = ref.watch(audioControllerProvider);
+
+  return player.durationStream;
+});
+
+final playerStateStreamProvider = StreamProvider((ref) {
+  final player = ref.watch(audioControllerProvider);
+
+  return player.playerStateStream;
+});
+
+
+==================================================
+FILE: lib\features\music\presentation\providers\realtime_song_provider.dart
+==================================================
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../../core/services/supabase_service.dart';
+
+final realtimeSongsProvider = StreamProvider((ref) {
+  return SupabaseService.client.from('songs').stream(primaryKey: ['id']);
+});
+
+
+==================================================
+FILE: lib\features\music\presentation\providers\song_provider.dart
+==================================================
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../data/repositories/song_repository.dart';
+import '../../models/song_model.dart';
+
+final songRepositoryProvider = Provider((ref) => SongRepository());
+
+final songsProvider = FutureProvider<List<SongModel>>((ref) async {
+  return ref.read(songRepositoryProvider).getSongs();
+});
+
+
+==================================================
+FILE: lib\features\music\presentation\screens\player_screen.dart
+==================================================
+
+import 'package:cached_network_image/cached_network_image.dart';
+
+import 'package:flutter/material.dart';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../../core/utils/duration_formatter.dart';
+
+import '../../models/song_model.dart';
+
+import '../../../../shared/providers/audio_controller.dart';
+
+import '../providers/player_streams.dart';
+
+class PlayerScreen extends ConsumerWidget {
+  final SongModel song;
+
+  const PlayerScreen({super.key, required this.song});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+
+          child: Column(
+            children: [
+              const SizedBox(height: 20),
+
+              ClipRRect(
+                borderRadius: BorderRadius.circular(30),
+
+                child: CachedNetworkImage(
+                  imageUrl: song.coverUrl,
+
+                  height: 350,
+                  width: 350,
+                  fit: BoxFit.cover,
+                ),
+              ),
+
+              const SizedBox(height: 40),
+
+              Text(
+                song.title,
+
+                style: const TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              Text(
+                song.artist,
+
+                style: const TextStyle(color: Colors.grey, fontSize: 18),
+              ),
+
+              const SizedBox(height: 40),
+
+              Consumer(
+                builder: (context, ref, _) {
+                  final positionAsync = ref.watch(positionStreamProvider);
+
+                  final durationAsync = ref.watch(durationStreamProvider);
+
+                  return positionAsync.when(
+                    data: (position) {
+                      return durationAsync.when(
+                        data: (duration) {
+                          final total = duration?.inSeconds.toDouble() ?? 1;
+
+                          return Column(
+                            children: [
+                              Slider(
+                                value: position.inSeconds.toDouble().clamp(
+                                  0,
+                                  total,
+                                ),
+
+                                max: total,
+
+                                onChanged: (value) async {
+                                  await ref
+                                      .read(audioControllerProvider.notifier)
+                                      .seek(Duration(seconds: value.toInt()));
+                                },
+                              ),
+
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+
+                                children: [
+                                  Text(formatDuration(position)),
+
+                                  Text(
+                                    formatDuration(duration ?? Duration.zero),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          );
+                        },
+
+                        loading: () => const SizedBox(),
+
+                        error: (_, __) => const SizedBox(),
+                      );
+                    },
+
+                    loading: () => const SizedBox(),
+
+                    error: (_, __) => const SizedBox(),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 20),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+
+                children: [
+                  IconButton(
+                    onPressed: () async {
+                      await ref
+                          .read(audioControllerProvider.notifier)
+                          .shuffle();
+                    },
+
+                    icon: const Icon(Icons.shuffle),
+                  ),
+
+                  IconButton(
+                    onPressed: () async {
+                      await ref
+                          .read(audioControllerProvider.notifier)
+                          .previous();
+                    },
+
+                    icon: const Icon(Icons.skip_previous, size: 40),
+                  ),
+
+                  Consumer(
+                    builder: (context, ref, _) {
+                      final playerState = ref.watch(playerStateStreamProvider);
+
+                      return playerState.when(
+                        data: (state) {
+                          final playing = state.playing;
+
+                          return IconButton(
+                            onPressed: () async {
+                              if (playing) {
+                                await ref
+                                    .read(audioControllerProvider.notifier)
+                                    .pause();
+                              } else {
+                                await ref
+                                    .read(audioControllerProvider.notifier)
+                                    .resume();
+                              }
+                            },
+
+                            icon: Icon(
+                              playing ? Icons.pause_circle : Icons.play_circle,
+
+                              size: 80,
+                            ),
+                          );
+                        },
+
+                        loading: () => const SizedBox(),
+
+                        error: (_, __) => const SizedBox(),
+                      );
+                    },
+                  ),
+
+                  IconButton(
+                    onPressed: () async {
+                      await ref.read(audioControllerProvider.notifier).next();
+                    },
+
+                    icon: const Icon(Icons.skip_next, size: 40),
+                  ),
+
+                  IconButton(
+                    onPressed: () async {
+                      await ref.read(audioControllerProvider.notifier).repeat();
+                    },
+
+                    icon: const Icon(Icons.repeat),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 30),
+
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Text(song.lyrics, style: const TextStyle(height: 1.8)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\music\presentation\widgets\music_card.dart
+==================================================
+
+import 'package:cached_network_image/cached_network_image.dart';
+
+import 'package:flutter/material.dart';
+
+import '../../models/song_model.dart';
+
+class MusicCard extends StatelessWidget {
+  final SongModel song;
+
+  final VoidCallback onTap;
+
+  const MusicCard({super.key, required this.song, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+
+      child: Container(
+        width: 160,
+
+        margin: const EdgeInsets.only(right: 16),
+
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+
+              child: CachedNetworkImage(
+                imageUrl: song.coverUrl,
+
+                height: 160,
+                width: 160,
+
+                fit: BoxFit.cover,
+
+                placeholder: (context, url) => Container(
+                  color: Colors.white10,
+
+                  child: const Center(child: CircularProgressIndicator()),
+                ),
+
+                errorWidget: (context, url, error) => Container(
+                  color: Colors.white10,
+
+                  child: const Icon(Icons.music_note),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            Text(
+              song.title,
+
+              maxLines: 1,
+
+              overflow: TextOverflow.ellipsis,
+
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+
+            const SizedBox(height: 4),
+
+            Text(song.artist, style: const TextStyle(color: Colors.grey)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\rss\data\repositories\rss_repository.dart
+==================================================
+
+// lib/features/rss/data/repositories/rss_repository.dart
+
+import '../../models/news_model.dart';
+import '../services/rss_service.dart';
+
+class RssRepository {
+  final service = RssService();
+
+  Future<List<NewsModel>> getNews(String url) async {
+    final feed = await service.loadFeed(url);
+
+    return feed.items?.map((item) {
+          return NewsModel(
+            title: item.title ?? '',
+            description: item.description ?? '',
+            link: item.link ?? '',
+            imageUrl: item.enclosure?.url ?? '',
+            // SỬA TẠI ĐÂY: Thêm .toString()
+            pubDate: item.pubDate?.toString() ?? '',
+          );
+        }).toList() ??
+        [];
+  }
+}
+
+
+==================================================
+FILE: lib\features\rss\data\services\bookmark_service.dart
+==================================================
+
+import '../../../../core/services/supabase_service.dart';
+
+class BookmarkService {
+  Future<void> saveBookmark({
+    required String title,
+    required String link,
+    required String imageUrl,
+  }) async {
+    await SupabaseService.client.from('bookmarks').insert({
+      'title': title,
+      'link': link,
+      'image_url': imageUrl,
+    });
+  }
+}
+
+
+==================================================
+FILE: lib\features\rss\data\services\rss_service.dart
+==================================================
+
+import 'package:http/http.dart' as http;
+import 'package:webfeed/domain/rss_feed.dart';
+import 'package:webfeed/webfeed.dart';
+
+class RssService {
+  Future<RssFeed> loadFeed(String url) async {
+    final response = await http.get(Uri.parse(url));
+
+    // DEBUG
+    print(response.statusCode);
+
+    if (response.statusCode == 200) {
+      return RssFeed.parse(response.body);
+    } else {
+      throw Exception('Failed to fetch RSS: ${response.statusCode}');
+    }
+  }
+}
+
+
+==================================================
+FILE: lib\features\rss\models\news_model.dart
+==================================================
+
+class NewsModel {
+  final String title;
+  final String description;
+  final String link;
+  final String imageUrl;
+  final String pubDate;
+
+  NewsModel({
+    required this.title,
+    required this.description,
+    required this.link,
+    required this.imageUrl,
+    required this.pubDate,
+  });
+}
+
+
+==================================================
+FILE: lib\features\rss\presentation\providers\rss_provider.dart
+==================================================
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../data/repositories/rss_repository.dart';
+import '../../models/news_model.dart';
+
+final rssRepositoryProvider = Provider((ref) => RssRepository());
+
+final rssProvider = FutureProvider.family<List<NewsModel>, String>((
+  ref,
+  url,
+) async {
+  return ref.read(rssRepositoryProvider).getNews(url);
+});
+
+
+==================================================
+FILE: lib\features\rss\presentation\screens\news_detail_screen.dart
+==================================================
+
+import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+
+class NewsDetailScreen extends StatelessWidget {
+  final String url;
+
+  const NewsDetailScreen({super.key, required this.url});
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = WebViewController()..loadRequest(Uri.parse(url));
+
+    return Scaffold(
+      appBar: AppBar(),
+
+      body: WebViewWidget(controller: controller),
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\rss\presentation\screens\rss_screen.dart
+==================================================
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../../core/constants/rss_constants.dart';
+import '../../models/news_model.dart';
+import '../providers/rss_provider.dart';
+import '../widgets/news_card.dart';
+import 'news_detail_screen.dart';
+
+class RssScreen extends ConsumerStatefulWidget {
+  const RssScreen({super.key});
+
+  @override
+  ConsumerState<RssScreen> createState() => _RssScreenState();
+}
+
+class _RssScreenState extends ConsumerState<RssScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController tabController;
+
+  final categories = {
+    'Technology': RssConstants.technology,
+    'Sport': RssConstants.sport,
+    'Business': RssConstants.business,
+    'Entertainment': RssConstants.entertainment,
+  };
+
+  @override
+  void initState() {
+    super.initState();
+
+    tabController = TabController(length: categories.length, vsync: this);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('BBC News'),
+
+        bottom: TabBar(
+          controller: tabController,
+          isScrollable: true,
+
+          tabs: categories.keys.map((e) => Tab(text: e)).toList(),
+        ),
+      ),
+
+      body: TabBarView(
+        controller: tabController,
+
+        children: categories.entries.map((entry) {
+          return Consumer(
+            builder: (context, ref, _) {
+              final newsAsync = ref.watch(rssProvider(entry.value));
+
+              return newsAsync.when(
+                data: (newsList) {
+                  return RefreshIndicator(
+                    onRefresh: () async {
+                      ref.refresh(rssProvider(entry.value));
+                    },
+
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(20),
+
+                      itemCount: newsList.length,
+
+                      itemBuilder: (_, index) {
+                        final news = newsList[index];
+
+                        return NewsCard(
+                          news: news,
+
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    NewsDetailScreen(url: news.link),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  );
+                },
+
+                loading: () => const Center(child: CircularProgressIndicator()),
+
+                error: (e, _) => Center(child: Text(e.toString())),
+              );
+            },
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\rss\presentation\widgets\news_card.dart
+==================================================
+
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+
+import '../../models/news_model.dart';
+
+class NewsCard extends StatelessWidget {
+  final NewsModel news;
+  final VoidCallback onTap;
+
+  const NewsCard({super.key, required this.news, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 20),
+
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(24),
+        ),
+
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+
+          children: [
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
+
+              child: news.imageUrl.isEmpty
+                  ? Container(height: 200, color: Colors.black26)
+                  : CachedNetworkImage(
+                      imageUrl: news.imageUrl.isEmpty
+                          ? 'https://picsum.photos/300'
+                          : news.imageUrl,
+                      height: 200,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
+            ),
+
+            Padding(
+              padding: const EdgeInsets.all(18),
+
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+
+                children: [
+                  Text(
+                    news.title,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  Text(
+                    news.description,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+
+                    style: const TextStyle(color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\upload\presentation\providers\upload_provider.dart
+==================================================
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../services/upload_service.dart';
+
+final uploadServiceProvider = Provider((ref) => UploadService());
+
+final uploadLoadingProvider = StateProvider<bool>((ref) => false);
+
+
+==================================================
+FILE: lib\features\upload\presentation\screens\upload_screen.dart
+==================================================
+
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../../features/upload/presentation/providers/upload_provider.dart';
+
+class UploadScreen extends ConsumerStatefulWidget {
+  const UploadScreen({super.key});
+
+  @override
+  ConsumerState<UploadScreen> createState() => _UploadScreenState();
+}
+
+class _UploadScreenState extends ConsumerState<UploadScreen> {
+  final titleController = TextEditingController();
+
+  final artistController = TextEditingController();
+
+  final lyricsController = TextEditingController();
+
+  File? musicFile;
+  File? coverFile;
+
+  Future<void> pickMusic() async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.audio);
+
+    if (result != null) {
+      musicFile = File(result.files.single.path!);
+
+      setState(() {});
+    }
+  }
+
+  Future<void> pickCover() async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+
+    if (result != null) {
+      coverFile = File(result.files.single.path!);
+
+      setState(() {});
+    }
+  }
+
+  Future<void> uploadSong() async {
+    if (musicFile == null || coverFile == null) {
+      return;
+    }
+
+    ref.read(uploadLoadingProvider.notifier).state = true;
+
+    try {
+      final uploadService = ref.read(uploadServiceProvider);
+
+      final musicUrl = await uploadService.uploadMusic(musicFile!);
+
+      final coverUrl = await uploadService.uploadCover(coverFile!);
+
+      await uploadService.saveSong(
+        title: titleController.text,
+        artist: artistController.text,
+        coverUrl: coverUrl,
+        audioUrl: musicUrl,
+        lyrics: lyricsController.text,
+      );
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Upload success')));
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+
+    ref.read(uploadLoadingProvider.notifier).state = false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final loading = ref.watch(uploadLoadingProvider);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Upload Song')),
+
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+
+        child: ListView(
+          children: [
+            GestureDetector(
+              onTap: pickCover,
+
+              child: Container(
+                height: 220,
+
+                decoration: BoxDecoration(
+                  color: Colors.white10,
+                  borderRadius: BorderRadius.circular(30),
+                ),
+
+                child: coverFile == null
+                    ? const Icon(Icons.image, size: 80)
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(30),
+
+                        child: Image.file(coverFile!, fit: BoxFit.cover),
+                      ),
+              ),
+            ),
+
+            const SizedBox(height: 24),
+
+            ElevatedButton(
+              onPressed: pickMusic,
+              child: Text(musicFile == null ? 'Pick MP3' : 'Music Selected'),
+            ),
+
+            const SizedBox(height: 24),
+
+            TextField(
+              controller: titleController,
+
+              decoration: const InputDecoration(hintText: 'Song title'),
+            ),
+
+            const SizedBox(height: 20),
+
+            TextField(
+              controller: artistController,
+
+              decoration: const InputDecoration(hintText: 'Artist'),
+            ),
+
+            const SizedBox(height: 20),
+
+            TextField(
+              controller: lyricsController,
+              maxLines: 10,
+
+              decoration: const InputDecoration(hintText: 'Lyrics'),
+            ),
+
+            const SizedBox(height: 30),
+
+            ElevatedButton(
+              onPressed: loading ? null : uploadSong,
+
+              child: loading
+                  ? const CircularProgressIndicator()
+                  : const Text('Upload Song'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+==================================================
+FILE: lib\features\upload\services\upload_service.dart
+==================================================
+
+import 'dart:io';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
+
+import '../../../core/services/supabase_service.dart';
+
+class UploadService {
+  final supabase = SupabaseService.client;
+
+  Future<String> uploadMusic(File file) async {
+    final fileName = const Uuid().v4();
+
+    await supabase.storage.from('music-files').upload('$fileName.mp3', file);
+
+    return supabase.storage.from('music-files').getPublicUrl('$fileName.mp3');
+  }
+
+  Future<String> uploadCover(File file) async {
+    final fileName = const Uuid().v4();
+
+    await supabase.storage.from('cover-images').upload('$fileName.jpg', file);
+
+    return supabase.storage.from('cover-images').getPublicUrl('$fileName.jpg');
+  }
+
+  Future<void> saveSong({
+    required String title,
+    required String artist,
+    required String coverUrl,
+    required String audioUrl,
+    required String lyrics,
+  }) async {
+    await supabase.from('songs').insert({
+      'title': title,
+      'artist': artist,
+      'cover_url': coverUrl,
+      'audio_url': audioUrl,
+      'lyrics': lyrics,
+    });
+  }
+}
+
+
+==================================================
+FILE: lib\shared\providers\audio_controller.dart
+==================================================
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:just_audio/just_audio.dart';
+
+import '../../features/music/models/song_model.dart';
+
+final audioControllerProvider =
+    StateNotifierProvider<AudioController, AudioPlayer>(
+      (ref) => AudioController(),
+    );
+
+class AudioController extends StateNotifier<AudioPlayer> {
+  AudioController() : super(AudioPlayer());
+
+  final List<SongModel> _queue = [];
+
+  int _currentIndex = 0;
+
+  SongModel? currentSong;
+
+  Future<void> loadPlaylist(List<SongModel> songs) async {
+    _queue.clear();
+    _queue.addAll(songs);
+
+    final playlist = ConcatenatingAudioSource(
+      children: songs.map((song) {
+        return AudioSource.uri(Uri.parse(song.audioUrl));
+      }).toList(),
+    );
+
+    await state.setAudioSource(playlist);
+  }
+
+  Future<void> playSong(SongModel song, int index) async {
+    if (_queue.isEmpty) {
+      await loadPlaylist([song]);
+    }
+
+    _currentIndex = index;
+
+    currentSong = song;
+
+    await state.seek(Duration.zero, index: index);
+
+    await state.play();
+  }
+
+  Future<void> pause() async {
+    await state.pause();
+  }
+
+  Future<void> resume() async {
+    await state.play();
+  }
+
+  Future<void> next() async {
+    await state.seekToNext();
+
+    if (_currentIndex < _queue.length - 1) {
+      _currentIndex++;
+
+      currentSong = _queue[_currentIndex];
+    }
+  }
+
+  Future<void> previous() async {
+    await state.seekToPrevious();
+
+    if (_currentIndex > 0) {
+      _currentIndex--;
+
+      currentSong = _queue[_currentIndex];
+    }
+  }
+
+  Future<void> seek(Duration duration) async {
+    await state.seek(duration);
+  }
+
+  Future<void> shuffle() async {
+    await state.shuffle();
+
+    await state.setShuffleModeEnabled(true);
+  }
+
+  Future<void> repeat() async {
+    await state.setLoopMode(LoopMode.all);
+  }
+}
+
+
+==================================================
+FILE: lib\shared\widgets\mini_player.dart
+==================================================
+
+import 'package:flutter/material.dart';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../shared/providers/audio_controller.dart';
+
+import '../../features/music/presentation/providers/player_streams.dart';
+
+class MiniPlayer extends ConsumerWidget {
+  const MiniPlayer({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final controller = ref.read(audioControllerProvider.notifier);
+
+    final song = controller.currentSong;
+
+    if (song == null) {
+      return const SizedBox();
+    }
+
+    final playerState = ref.watch(playerStateStreamProvider);
+
+    return Container(
+      margin: const EdgeInsets.all(16),
+
+      padding: const EdgeInsets.all(12),
+
+      decoration: BoxDecoration(
+        color: Colors.black87,
+
+        borderRadius: BorderRadius.circular(20),
+      ),
+
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+
+            child: Image.network(
+              song.coverUrl,
+
+              width: 55,
+              height: 55,
+              fit: BoxFit.cover,
+            ),
+          ),
+
+          const SizedBox(width: 12),
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+
+              children: [
+                Text(song.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+
+                Text(song.artist, style: const TextStyle(color: Colors.grey)),
+              ],
+            ),
+          ),
+
+          IconButton(
+            onPressed: () async {
+              await controller.previous();
+            },
+
+            icon: const Icon(Icons.skip_previous),
+          ),
+
+          playerState.when(
+            data: (state) {
+              return IconButton(
+                onPressed: () async {
+                  if (state.playing) {
+                    await controller.pause();
+                  } else {
+                    await controller.resume();
+                  }
+                },
+
+                icon: Icon(
+                  state.playing ? Icons.pause_circle : Icons.play_circle,
+                ),
+              );
+            },
+
+            loading: () => const SizedBox(),
+
+            error: (_, __) => const SizedBox(),
+          ),
+
+          IconButton(
+            onPressed: () async {
+              await controller.next();
+            },
+
+            icon: const Icon(Icons.skip_next),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+==================================================
+FILE: test\widget_test.dart
+==================================================
+
+// This is a basic Flutter widget test.
+//
+// To perform an interaction with a widget in your test, use the WidgetTester
+// utility in the flutter_test package. For example, you can send tap and scroll
+// gestures. You can also use WidgetTester to find child widgets in the widget
+// tree, read text, and verify that the values of widget properties are correct.
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:music_rss_app/main.dart';
+
+void main() {
+  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+    // Build our app and trigger a frame.
+    await tester.pumpWidget(const MyApp());
+
+    // Verify that our counter starts at 0.
+    expect(find.text('0'), findsOneWidget);
+    expect(find.text('1'), findsNothing);
+
+    // Tap the '+' icon and trigger a frame.
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pump();
+
+    // Verify that our counter has incremented.
+    expect(find.text('0'), findsNothing);
+    expect(find.text('1'), findsOneWidget);
+  });
+}
+
+
